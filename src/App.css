@@ -1,0 +1,53 @@
+.app {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+nav {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 0;
+  border-bottom: 1px solid #333;
+  margin-bottom: 2rem;
+}
+
+nav a {
+  color: inherit;
+  text-decoration: none;
+}
+
+nav a:hover {
+  text-decoration: underline;
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-size: 1.2rem;
+}
+
+.dashboard, .premium-content {
+  max-width: 600px;
+}
+
+.user-info {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+.user-info p {
+  margin: 0.25rem 0;
+}
+
+.purchase-gate {
+  margin-top: 2rem;
+  padding: 1rem;
+  border: 1px solid #666;
+  border-radius: 4px;
+}

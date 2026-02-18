@@ -1,0 +1,42 @@
+# Dependencies
+node_modules
+
+# Build
+dist
+dist-ssr
+
+# Environment
+.env
+.env.local
+*.local
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+
+# Temp
+/tmp/
