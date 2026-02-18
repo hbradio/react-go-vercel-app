@@ -199,13 +199,72 @@ mux.HandleFunc("/api/user", handler.UserHandler)
 
 ---
 
-## Vercel API
+## Vercel Deployment
 
 ### Auth header format
 ```
 Authorization: Bearer {token}
 ```
 Verify with `GET /v2/user` to confirm the token works and get the username.
+
+### GitHub push protection blocks hardcoded secrets
+GitHub's push protection scans for API keys in committed files. The Stripe secret key in `package.json`'s `dev:stripe` npm script triggered this:
+```
+GITHUB PUSH PROTECTION — Push cannot contain secrets
+Stripe Test API Secret Key — path: package.json:9
+```
+**Fix:** Reference env vars instead of hardcoding: `--api-key $STRIPE_SECRET_KEY`
+
+### TypeScript `verbatimModuleSyntax` breaks Vercel builds
+Vite's default `tsconfig.json` enables `verbatimModuleSyntax`. Type-only imports must use `import type`:
+```typescript
+// WRONG — fails on Vercel build
+import { ReactNode } from 'react'
+
+// RIGHT
+import type { ReactNode } from 'react'
+```
+The error is: `TS1484: 'ReactNode' is a type and must be imported using a type-only import`. Always run `npm run build` locally before pushing.
+
+### Vercel deployment API requires numeric `repoId`
+When triggering deployments via `POST /v13/deployments`, the `gitSource` object requires the numeric `repoId`, not just the repo name:
+```python
+{
+    "gitSource": {
+        "type": "github",
+        "repo": "hbradio/react-go-vercel-app",
+        "repoId": 1161043543,  # Get from GET /v9/projects/{id} → link.repoId
+        "ref": "master"
+    }
+}
+```
+
+### Updating Vercel env vars requires the env var ID
+You can't just PATCH by key name. List all env vars first, find the ID, then update:
+```python
+# List: GET /v9/projects/{id}/env → find env var by key
+# Update: PATCH /v9/projects/{id}/env/{env_id} with {"value": "new_value"}
+```
+
+### Env var changes require redeployment
+After updating environment variables on a Vercel project, existing deployments don't pick up the changes. You must trigger a new deployment (push a commit or call the deployment API).
+
+### CockroachDB Cloud port 26257 works from Vercel
+Port 26257 is blocked by corporate firewalls locally, but Vercel's infrastructure can reach it. The auto-migration in `db.go` successfully creates the `users` table on the first API request from Vercel.
+
+### Auth0 consent screen disappears on production (HTTPS)
+The `skip_consent_for_verifiable_first_party_clients` setting only works on HTTPS origins that Auth0 can verify. On localhost (HTTP), the consent screen still appears on every token request. On production (HTTPS), it's completely skipped — confirmed working.
+
+### Stripe webhook works end-to-end on production
+The production webhook flow is seamless:
+1. Create webhook endpoint via Stripe API: `POST /v1/webhook_endpoints` with production URL
+2. Get the `secret` from the response
+3. Set it as `STRIPE_WEBHOOK_SECRET` on Vercel
+4. Redeploy
+5. After purchase, Stripe sends `checkout.session.completed` → webhook verifies signature → updates CockroachDB → user sees "Premium" immediately on redirect back
+
+### Vercel auto-deploys on GitHub push
+Once the Vercel project is linked to a GitHub repo, every push to the production branch triggers an automatic deployment. No need to manually trigger via API after the initial setup.
 
 ---
 
@@ -287,13 +346,8 @@ docker run -d --name starter-postgres \
 ### Test card for sandbox checkout
 Use card number `4242 4242 4242 4242` with any future expiration date and any 3-digit CVC. This always succeeds in Stripe sandbox mode.
 
-### Stripe webhooks can't reach localhost
-After completing a Stripe Checkout payment locally, the `checkout.session.completed` webhook won't fire because Stripe can't reach `localhost`. The user's `has_purchased` flag won't update automatically.
-
-**Workarounds:**
-1. Manually update the DB: `UPDATE users SET has_purchased = true WHERE email = 'testuser@example.com'`
-2. Use Stripe CLI to forward webhooks: `stripe listen --forward-to localhost:8080/api/webhook`
-3. Only test the full webhook flow on a deployed environment (Vercel)
+### Stripe webhooks can't reach localhost — use Stripe CLI Docker
+After completing a Stripe Checkout payment locally, the `checkout.session.completed` webhook won't fire because Stripe can't reach `localhost`. Use the Stripe CLI Docker container (see "Stripe CLI via Docker" section below) to forward webhooks locally. On production (Vercel), webhooks work natively via the registered webhook endpoint.
 
 ### Verify payments via Stripe API
 After a test purchase, confirm it went through:
@@ -338,3 +392,29 @@ Key details:
 - The CLI prints a `whsec_...` signing secret on startup — put this in `.env` as `STRIPE_WEBHOOK_SECRET`
 - The secret persists across CLI restarts (cached by Stripe)
 - Start the CLI BEFORE the API server, copy the `whsec_` into `.env`, then start the API server
+
+---
+
+## Verification with Chrome DevTools MCP
+
+### Use Chrome DevTools MCP instead of Playwright
+The Chrome DevTools MCP server (`chrome-devtools-mcp`) provides everything needed for end-to-end verification: page navigation, element clicking, form filling, text waiting, and screenshots. No need for Playwright — it avoids browser installation issues, headless configuration, and test framework boilerplate.
+
+### Key MCP tools for testing
+- `navigate_page` — go to a URL
+- `take_snapshot` — get the page's a11y tree (shows all elements with UIDs)
+- `click` — click an element by UID
+- `fill_form` — fill multiple form fields at once
+- `wait_for` — wait for text to appear (with timeout)
+- `take_screenshot` — visual verification
+
+### Testing flow pattern
+1. Navigate to the page
+2. `wait_for` the expected text to confirm it loaded
+3. `take_snapshot` to find element UIDs
+4. `click` or `fill_form` to interact
+5. `wait_for` the next expected state
+6. Repeat
+
+### Stripe Checkout is testable via MCP
+The Stripe Checkout page (hosted on `checkout.stripe.com`) is fully accessible via Chrome DevTools MCP. The card form fields, radio buttons, and checkboxes all have UIDs and respond to `fill_form` and `click`.

@@ -234,18 +234,52 @@ Test flow using Chrome DevTools MCP:
 
 ### Phase 9: Deploy to Vercel
 
-- Create GitHub repo via `gh repo create`
-- Push code
-- Create Vercel project via API or CLI, link to GitHub repo
-- Set environment variables on Vercel:
-  - `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`
-  - `DATABASE_URL` (CockroachDB Cloud connection string — port 26257 is accessible from Vercel)
-  - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (production webhook secret from Stripe dashboard), `STRIPE_PRICE_ID`
-  - `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, `VITE_STRIPE_PUBLISHABLE_KEY`
-- Deploy and get production URL
-- Update Auth0 SPA callback URLs to include `https://<vercel-domain>`
-- Create Stripe webhook endpoint in dashboard pointing to `https://<vercel-domain>/api/webhook` for event `checkout.session.completed`
-- Run the same verification flow against production
+**Before pushing to GitHub:**
+- Remove any hardcoded secrets from `package.json` (e.g., Stripe key in `dev:stripe` script). GitHub push protection will block the push. Use `$STRIPE_SECRET_KEY` env var reference instead.
+- Use `import type` for type-only imports in TypeScript (e.g., `import type { ReactNode } from 'react'`). Vite's `verbatimModuleSyntax` enforces this, and the build will fail on Vercel otherwise.
+- Run `npm run build` locally to catch any TypeScript/lint errors before pushing.
+
+**Deployment steps:**
+1. Create GitHub repo: `gh repo create hbradio/react-go-vercel-app --public --source=. --push`
+2. Create Vercel project via API, linked to the GitHub repo:
+   ```python
+   POST /v10/projects
+   {"name": "react-go-vercel-app", "framework": "vite", "gitRepository": {"type": "github", "repo": "hbradio/react-go-vercel-app"}}
+   ```
+3. Set all environment variables via API: `POST /v10/projects/{id}/env` for each var. Use `type: "encrypted"` for secrets, `type: "plain"` for `VITE_` vars. Set `STRIPE_WEBHOOK_SECRET` to a placeholder for now.
+4. Push triggers auto-deploy. Poll `GET /v6/deployments?projectId={id}` until `readyState: READY`.
+5. Production URL will be `https://react-go-vercel-app.vercel.app`.
+6. Update Auth0 SPA callback URLs to include production domain (keep localhost URLs too):
+   ```python
+   PATCH /api/v2/clients/{id}
+   {"callbacks": ["http://localhost:5179", "https://react-go-vercel-app.vercel.app"]}
+   ```
+7. Create Stripe webhook endpoint via API:
+   ```python
+   POST /v1/webhook_endpoints
+   url=https://react-go-vercel-app.vercel.app/api/webhook&enabled_events[]=checkout.session.completed
+   ```
+   This returns a `secret` — update the Vercel `STRIPE_WEBHOOK_SECRET` env var with it via `PATCH /v9/projects/{id}/env/{env_id}`.
+8. Redeploy to pick up the updated webhook secret (push a commit, or trigger via API with `POST /v13/deployments`).
+
+**Vercel API notes:**
+- Creating a deployment requires `repoId` (numeric) from the project's `link` object, not just the repo name.
+- Updating an env var requires its ID — list them first via `GET /v9/projects/{id}/env`, find by key, then `PATCH /v9/projects/{id}/env/{env_id}`.
+- Vercel auto-deploys on every push to the production branch once the GitHub repo is linked.
+
+### Phase 10: Verify on Production
+
+Use Chrome DevTools MCP (not Playwright — DevTools MCP is sufficient and simpler):
+1. Navigate to `https://react-go-vercel-app.vercel.app`
+2. Landing page loads with nav + login CTA
+3. Click "Log in" → Auth0 Universal Login (no consent screen on HTTPS)
+4. Auth0 auto-authenticates if session exists, otherwise sign up
+5. Dashboard loads — calls `/api/user` which hits CockroachDB Cloud, creates user record, shows Status: Free
+6. Click "Buy Access" → Stripe Checkout with correct product ($9.99)
+7. Fill test card `4242424242424242`, uncheck "Save my info" first, pay
+8. Redirected back to `/dashboard?purchased=true` — **Status: Premium** (webhook fired and updated DB)
+9. Click "View premium content" → Premium page shows unlocked content
+10. No consent screens, no re-auth on navigation
 
 ---
 
@@ -311,6 +345,16 @@ These already exist from the first build. Check before re-creating.
 | Stripe | Product | `prod_U0BoHLSoh98hkz` |
 | Stripe | Price ($9.99) | `price_1T2BQYLhIa34mtQg9hMp9VjR` |
 | Vercel | User | `hbradio` |
+| Vercel | Project | `prj_df49qM15GT8GbzbJFKSYKUP7EGTW` |
+| Vercel | Production URL | `https://react-go-vercel-app.vercel.app` |
+| GitHub | Repo | `hbradio/react-go-vercel-app` |
+| Stripe | Webhook Endpoint | `we_1T2EQLLhIa34mtQgLElfXX7y` |
+
+---
+
+## Verification Approach
+
+Use **Chrome DevTools MCP** for all verification — both local and production. It provides page snapshots (a11y tree), element interaction (click, fill, navigate), and screenshots. This is simpler and more reliable than Playwright for this use case. No browser installation or headless configuration needed.
 
 ---
 
