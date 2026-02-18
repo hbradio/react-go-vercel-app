@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "dev:api": "go run ./cmd/local-server",
-    "dev:stripe": "docker run --rm --name stripe-cli stripe/stripe-cli listen --api-key $STRIPE_SECRET_KEY --forward-to http://host.docker.internal:8089/api/webhook -s",
+    "dev:stripe": "node scripts/stripe-listen.js",
+    "dev:docker": "docker start starter-postgres || docker run -d --name starter-postgres -e POSTGRES_USER=app_user -e POSTGRES_PASSWORD=localdev -e POSTGRES_DB=starter_app -p 5433:5432 postgres:16-alpine",
+    "dev:all": "npm run dev:docker && concurrently -n api,web,stripe -c blue,green,yellow \"npm run dev:api\" \"npm run dev\" \"npm run dev:stripe\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -23,6 +25,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
+    "concurrently": "^9.2.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
